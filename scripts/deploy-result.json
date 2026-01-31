@@ -1,0 +1,8 @@
+{
+  "network": "kite-testnet",
+  "contract": "DeathCertificateRegistry",
+  "address": "0x0dCaFE5A9E5FF613555a86F9b7bd0E990091b68D",
+  "deployer": "0x53C1844Af058fE3B3195e49fEC8f97E0a4F87772",
+  "txHash": "0x3a4eb6d060c289b0d4c5783fb6d04290b1ac7a683edc587fd1e58c5c0ad8bfc1",
+  "timestamp": "2026-01-31T20:39:16.388Z"
+}
