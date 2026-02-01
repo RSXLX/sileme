@@ -61,6 +61,11 @@ import {
   getVaultExplorerUrl,
   VaultStatus
 } from './services/vaultService';
+import {
+  deployKitepass,
+  configureSpendingRules,
+  getKitepassStatus,
+} from './services/kitepassApi';
 import { AppStatus, SarcophagusState, TransactionLog, Beneficiary, Wallet, Token, KiteAgent, TransactionRecord, DistributionPlan, NetworkStatus, SignedTransactionData } from './types';
 import { Signer, BrowserProvider } from 'ethers';
 import { Circle, Heart, Skull, Shield, Activity, Lock, Wallet as WalletIcon, Clock, Zap, Play, Share2, Link, Plus, Coins, User, RefreshCw, ExternalLink, Settings, Twitter, AlertTriangle } from 'lucide-react';
@@ -228,6 +233,16 @@ const App: React.FC = () => {
     willWeight: number;
     socialWeight: number;
     intentMatch: number;
+  } | null>(null);
+
+  // KitePass 状态 (ClientAgentVault 集成)
+  const [useKitepass, setUseKitepass] = useState(false); // 是否使用 KitePass 模式
+  const [kitepassAddress, setKitepassAddress] = useState<string | null>(null);
+  const [isDeployingKitepass, setIsDeployingKitepass] = useState(false);
+  const [kitepassStatus, setKitepassStatus] = useState<{
+    balance?: string;
+    symbol?: string;
+    rulesConfigured?: boolean;
   } | null>(null);
 
   // 核心执行逻辑：准备分发计划并打开确认弹窗
@@ -881,6 +896,66 @@ const App: React.FC = () => {
         return;
       }
 
+      // 步骤 4.6: KitePass 部署和配置（如果启用）
+      let deployedKitepassAddress = kitepassAddress;
+      if (useKitepass) {
+        console.log('🔹 Step 4.6: Deploying KitePass (ClientAgentVault)...');
+        addLog('AI_THINKING', '🏦 正在部署 KitePass 金库合约...');
+        setIsDeployingKitepass(true);
+        
+        try {
+          // 4.6.1 部署 KitePass
+          if (!deployedKitepassAddress) {
+            const deployResult = await deployKitepass(kiteAgent.ownerAddress);
+            console.log('   Deploy Result:', deployResult);
+            
+            if (!deployResult.success) {
+              addLog('ALERT', `❌ KitePass 部署失败: ${deployResult.error}`);
+              addLog('AI_THINKING', '💡 降级到 Approve 模式继续...');
+              setUseKitepass(false);
+            } else {
+              deployedKitepassAddress = deployResult.kitepassAddress!;
+              setKitepassAddress(deployedKitepassAddress);
+              addLog('CHAIN_TX', `🏦 KitePass 已部署: ${shortenAddress(deployedKitepassAddress)}`);
+              
+              // 4.6.2 配置 Spending Rules
+              addLog('AI_THINKING', '⚙️ 正在配置消费规则...');
+              const configResult = await configureSpendingRules(
+                kiteAgent.ownerAddress,
+                deployedKitepassAddress
+              );
+              
+              if (configResult.success) {
+                addLog('CHAIN_TX', '✅ 消费规则已配置');
+                setKitepassStatus(prev => ({ ...prev, rulesConfigured: true }));
+              } else {
+                addLog('AI_THINKING', `⚠️ 规则配置失败: ${configResult.error}`);
+              }
+              
+              // 4.6.3 获取金库状态
+              const statusResult = await getKitepassStatus(deployedKitepassAddress);
+              if (statusResult.success) {
+                setKitepassStatus({
+                  balance: statusResult.balance,
+                  symbol: statusResult.symbol,
+                  rulesConfigured: true,
+                });
+              }
+            }
+          } else {
+            addLog('AI_THINKING', `✅ 使用已有 KitePass: ${shortenAddress(deployedKitepassAddress)}`);
+          }
+        } catch (kitepassError: any) {
+          console.error('❌ KitePass setup failed:', kitepassError);
+          addLog('ALERT', `❌ KitePass 设置失败: ${kitepassError.message}`);
+          addLog('AI_THINKING', '💡 降级到 Approve 模式继续...');
+          setUseKitepass(false);
+          deployedKitepassAddress = null;
+        } finally {
+          setIsDeployingKitepass(false);
+        }
+      }
+
       // 步骤 5: 请求用户对授权消息签名 (EIP-712)
       console.log('🔹 Step 5: Requesting EIP-712 Signature...');
       addLog('AI_THINKING', '✍️ Requesting secure signature...');
@@ -1152,8 +1227,21 @@ const App: React.FC = () => {
     addLog('AI_THINKING', '✨ NO USER SIGNATURE REQUIRED - Backend custody will execute automatically!');
 
     try {
-      // 调用后端执行遗嘱
-      const result = await executeWillViaBackend(willId, willOwner);
+      // 将当前 beneficiaries 转换为后端格式（可能已被 AI 加权调整）
+      const overrideBeneficiaries = data.beneficiaries.map(b => ({
+        address: b.walletAddress,
+        percentage: b.percentage,
+        name: b.name,
+      }));
+      
+      // 调试日志：显示发送给后端的受益人
+      console.log('📊 [Execute] Override beneficiaries to be sent:', overrideBeneficiaries);
+      overrideBeneficiaries.forEach((b, i) => {
+        console.log(`   ${i + 1}. ${b.name}: ${b.percentage}% -> ${b.address?.slice(0, 15)}...`);
+      });
+      
+      // 调用后端执行遗嘱，传递可能已调整的受益人列表
+      const result = await executeWillViaBackend(willId, willOwner, overrideBeneficiaries);
       
       if (!result.success) {
         addLog('ALERT', `❌ Backend execution failed: ${result.error}`);
@@ -1332,9 +1420,18 @@ const App: React.FC = () => {
                     }
                   }}
                   onFriendsLoaded={(friends) => {
-                    // 同步好友数据到状态，用于 AI 遗嘱解析匹配
-                    console.log(`🤝 [App] Synced ${friends.length} friends for will parsing`);
-                    setTwitterFriends(friends);
+                    // 同步好友数据到状态
+                    // 检测变化：长度变化 OR 任意钱包地址变化
+                    const hasChange = friends.length !== twitterFriends.length ||
+                      friends.some((f, i) => {
+                        const existing = twitterFriends.find(tf => tf.screen_name === f.screen_name);
+                        return !existing || existing.wallet_address !== f.wallet_address;
+                      });
+                    
+                    if (hasChange) {
+                      console.log(`🤝 [App] Synced ${friends.length} friends for will parsing (wallet updated)`);
+                      setTwitterFriends(friends);
+                    }
                   }}
                 />
               )}
@@ -1360,6 +1457,86 @@ const App: React.FC = () => {
                  </div>
                  <div className="text-xl font-mono text-kite-neon">180 {t('common.days')}</div>
               </div>
+
+              {/* KitePass 高级选项 (ClientAgentVault) */}
+              <div className={`p-4 rounded-xl border transition-all duration-300 ${
+                useKitepass 
+                  ? 'bg-gradient-to-br from-cyan-900/30 to-purple-900/30 border-cyan-500/50 shadow-lg shadow-cyan-500/10' 
+                  : 'bg-kite-800/20 border-gray-800'
+              }`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                      useKitepass ? 'bg-cyan-500/20' : 'bg-gray-800'
+                    }`}>
+                      <Shield className={`w-4 h-4 ${useKitepass ? 'text-cyan-400' : 'text-gray-500'}`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-200 flex items-center gap-2">
+                        KitePass 模式
+                        <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded-full font-normal">
+                          高级
+                        </span>
+                      </p>
+                      <p className="text-xs text-gray-500">使用链上权限控制保护资产</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setUseKitepass(!useKitepass)}
+                    className={`relative w-12 h-6 rounded-full transition-all duration-300 ${
+                      useKitepass 
+                        ? 'bg-gradient-to-r from-cyan-500 to-purple-500' 
+                        : 'bg-gray-700'
+                    }`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow-lg transition-all duration-300 ${
+                      useKitepass ? 'left-7' : 'left-1'
+                    }`} />
+                  </button>
+                </div>
+                
+                {/* KitePass 详情展开 */}
+                {useKitepass && (
+                  <div className="mt-4 pt-4 border-t border-cyan-500/20 space-y-3">
+                    {!kitepassAddress ? (
+                      <div className="flex items-center gap-3 text-sm text-gray-400">
+                        <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                        <span>封存时将自动部署 KitePass 合约</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-400">合约地址</span>
+                          <span className="font-mono text-cyan-400">{shortenAddress(kitepassAddress)}</span>
+                        </div>
+                        {kitepassStatus && (
+                          <>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-gray-400">金库余额</span>
+                              <span className="font-mono text-white">{kitepassStatus.balance || '0'} {kitepassStatus.symbol || 'USDT'}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-gray-400">规则状态</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                kitepassStatus.rulesConfigured 
+                                  ? 'bg-green-500/20 text-green-400' 
+                                  : 'bg-yellow-500/20 text-yellow-400'
+                              }`}>
+                                {kitepassStatus.rulesConfigured ? '已配置' : '待配置'}
+                              </span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-gray-500 flex items-center gap-1.5">
+                      <Lock size={10} />
+                      托管钱包仅可在规则范围内操作
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Button onClick={handleSealTomb} disabled={!draftManifesto || isLoading || data.wallets.length === 0} className="w-full flex items-center justify-center gap-2">
                 {isLoading ? (
                   <>{t('common.loading')} <Activity className="animate-spin" size={16}/></>

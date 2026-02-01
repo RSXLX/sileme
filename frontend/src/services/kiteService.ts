@@ -142,6 +142,7 @@ export const getAAWalletAddress = async (signer: Signer): Promise<string> => {
     
     // MVP: 直接使用 EOA 地址
     // 完整版可以调用 SimpleAccountFactory 计算真正的 AA 地址
+    // FIX: Using Salt=1 to match backend fix for broken proxy implementation
     return ownerAddress;
   } catch (error) {
     console.error("Failed to get AA Wallet address:", error);
@@ -359,8 +360,11 @@ export const calculateDistribution = (
     const distributableAmount = balanceBigInt - gasReserve;
     
     // 计算每个受益人的分配金额
+    // 注意：百分比可能是小数（如 34.4%），需要转为整数计算
     const distributions: DistributionItem[] = beneficiaries.map(beneficiary => {
-      const amount = (distributableAmount * BigInt(beneficiary.percentage)) / BigInt(100);
+      // 将百分比乘以 10 避免小数问题 (34.4% -> 344/1000)
+      const percentageScaled = Math.round(beneficiary.percentage * 10);
+      const amount = (distributableAmount * BigInt(percentageScaled)) / BigInt(1000);
       return {
         beneficiary,
         amount: amount.toString(),

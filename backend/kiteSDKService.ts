@@ -62,8 +62,10 @@ export const getAAWalletAddress = async (ownerAddress: string, salt?: bigint): P
   
   try {
     // 使用 SDK 的 getAccountAddress 方法计算 AA 地址
-    const aaAddress = kiteAA.getAccountAddress(ownerAddress, salt ?? BigInt(0));
-    console.log(`✅ AA Wallet address: ${aaAddress}`);
+    // FIX: Use Salt=1 to rotate address (Old address 0x3CFd... points to wrong impl)
+    const defaultSalt = BigInt(1);
+    const aaAddress = kiteAA.getAccountAddress(ownerAddress, salt ?? defaultSalt);
+    console.log(`✅ AA Wallet address: ${aaAddress} (Salt: ${salt ?? defaultSalt})`);
     return aaAddress;
   } catch (error) {
     console.error('❌ Failed to get AA address:', error);
@@ -105,7 +107,8 @@ export const sendUserOperation = async (
       target: params.target,
       value: params.value ?? BigInt(0),
       callData: params.callData,
-    };
+      paymasterAndData: '0x', // Force Self-Pay to bypass AA33 error
+    } as any;
     
     const signFn = createSignFunction(params.privateKey);
     
@@ -146,7 +149,8 @@ export const sendUserOperationAndWait = async (
       target: params.target,
       value: params.value ?? BigInt(0),
       callData: params.callData,
-    };
+      paymasterAndData: '0x', // Force Self-Pay
+    } as any;
     
     const signFn = createSignFunction(params.privateKey);
     
@@ -191,8 +195,9 @@ export const estimateUserOperation = async (
   const request: UserOperationRequest = {
     target,
     value: value ?? BigInt(0),
-    callData: callData ?? '0x',
-  };
+    callData: callData || '0x',
+    paymasterAndData: '0x', // Force Self-Pay
+  } as any;
   
   return await kiteAA.estimateUserOperation(ownerAddress, request);
 };

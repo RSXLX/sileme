@@ -326,15 +326,25 @@ export const getWillStatusFromBackend = async (owner: string): Promise<WillStatu
 
 /**
  * 执行遗嘱（后端代发交易）
+ * @param willId 遗嘱ID
+ * @param owner 遗嘱所有者地址
+ * @param overrideBeneficiaries 可选：覆盖的受益人列表（用于 AI 加权调整后的分配）
  */
-export const executeWillViaBackend = async (willId: string, owner: string): Promise<WillExecuteResponse> => {
+export const executeWillViaBackend = async (
+  willId: string, 
+  owner: string,
+  overrideBeneficiaries?: WillBeneficiary[]
+): Promise<WillExecuteResponse> => {
   try {
     console.log(`📡 [Will] Executing will ${willId}...`);
+    if (overrideBeneficiaries) {
+      console.log(`   📊 Using override beneficiaries: ${overrideBeneficiaries.length} recipients`);
+    }
     
     const response = await fetch(`${BACKEND_URL}/api/will/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ willId, owner }),
+      body: JSON.stringify({ willId, owner, overrideBeneficiaries }),
     });
     
     const data = await response.json();

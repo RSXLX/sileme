@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch server.ts",
     "start": "node dist/server.js",
-    "build": "tsc"
+    "build": "tsc",
+    "db:reset": "tsx reset-db.ts"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",

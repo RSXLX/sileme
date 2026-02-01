@@ -22,6 +22,14 @@ import {
   executeWill,
   WILL_CONSTANTS,
 } from './willService.js';
+import {
+  deployKitepass,
+  configureSpendingRules,
+  viewSpendingRules,
+  getVaultBalance,
+  withdrawFunds,
+  getDefaultWillSpendingRules,
+} from './kitepassService.js';
 
 dotenv.config();
 
@@ -343,11 +351,11 @@ app.get('/api/will/status/:owner', (req, res) => {
 /**
  * 执行遗嘱
  * POST /api/will/execute
- * Body: { willId, owner }
+ * Body: { willId, owner, overrideBeneficiaries? }
  */
 app.post('/api/will/execute', async (req, res) => {
   try {
-    const { willId, owner } = req.body;
+    const { willId, owner, overrideBeneficiaries } = req.body;
     
     if (!willId || !owner) {
       return res.status(400).json({ 
@@ -365,8 +373,11 @@ app.post('/api/will/execute', async (req, res) => {
     }
     
     console.log(`📥 [Will] Execute request for ${willId}`);
+    if (overrideBeneficiaries) {
+      console.log(`   📊 Using override beneficiaries: ${overrideBeneficiaries.length} recipients`);
+    }
     
-    const result = await executeWill(willId, owner, custodyPrivateKey);
+    const result = await executeWill(willId, owner, custodyPrivateKey, overrideBeneficiaries);
     
     if (result.success) {
       res.json({
@@ -386,6 +397,161 @@ app.post('/api/will/execute', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to execute will',
+    });
+  }
+});
+
+// ==================== KitePass API (ClientAgentVault) ====================
+
+/**
+ * 部署 KitePass 合约
+ * POST /api/kitepass/deploy
+ * Body: { eoaAddress: string }
+ */
+app.post('/api/kitepass/deploy', async (req, res) => {
+  try {
+    const { eoaAddress } = req.body;
+    
+    if (!eoaAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'eoaAddress is required',
+      });
+    }
+    
+    const custodyPrivateKey = process.env.CUSTODY_PRIVATE_KEY;
+    if (!custodyPrivateKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Custody wallet not configured',
+      });
+    }
+    
+    console.log(`🚀 [KitePass] Deploy request for EOA: ${eoaAddress}`);
+    
+    const result = await deployKitepass(eoaAddress, custodyPrivateKey);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error deploying KitePass:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to deploy KitePass',
+    });
+  }
+});
+
+/**
+ * 配置 Spending Rules
+ * POST /api/kitepass/configure-rules
+ * Body: { eoaAddress: string, kitepassAddress: string, rules?: SpendingRule[] }
+ */
+app.post('/api/kitepass/configure-rules', async (req, res) => {
+  try {
+    const { eoaAddress, kitepassAddress, rules } = req.body;
+    
+    if (!eoaAddress || !kitepassAddress) {
+      return res.status(400).json({
+        success: false,
+        error: 'eoaAddress and kitepassAddress are required',
+      });
+    }
+    
+    const custodyPrivateKey = process.env.CUSTODY_PRIVATE_KEY;
+    if (!custodyPrivateKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Custody wallet not configured',
+      });
+    }
+    
+    console.log(`⚙️ [KitePass] Configure rules for: ${kitepassAddress}`);
+    
+    const result = await configureSpendingRules(
+      eoaAddress,
+      kitepassAddress,
+      custodyPrivateKey,
+      rules
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error configuring spending rules:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to configure spending rules',
+    });
+  }
+});
+
+/**
+ * 查询金库状态 (余额 + 规则)
+ * GET /api/kitepass/status/:address
+ */
+app.get('/api/kitepass/status/:address', async (req, res) => {
+  try {
+    const { address } = req.params;
+    
+    console.log(`📊 [KitePass] Status query for: ${address}`);
+    
+    const [balanceResult, rulesResult] = await Promise.all([
+      getVaultBalance(address),
+      viewSpendingRules(address),
+    ]);
+    
+    res.json({
+      success: balanceResult.success && rulesResult.success,
+      address,
+      balance: balanceResult.balance,
+      symbol: balanceResult.symbol,
+      rules: rulesResult.rules,
+      error: balanceResult.error || rulesResult.error,
+    });
+  } catch (error: any) {
+    console.error('Error getting KitePass status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to get KitePass status',
+    });
+  }
+});
+
+/**
+ * 从金库提取资金
+ * POST /api/kitepass/withdraw
+ * Body: { eoaAddress: string, kitepassAddress: string, amount: string }
+ */
+app.post('/api/kitepass/withdraw', async (req, res) => {
+  try {
+    const { eoaAddress, kitepassAddress, amount } = req.body;
+    
+    if (!eoaAddress || !kitepassAddress || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'eoaAddress, kitepassAddress, and amount are required',
+      });
+    }
+    
+    const custodyPrivateKey = process.env.CUSTODY_PRIVATE_KEY;
+    if (!custodyPrivateKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Custody wallet not configured',
+      });
+    }
+    
+    console.log(`💸 [KitePass] Withdraw ${amount} from: ${kitepassAddress}`);
+    
+    const result = await withdrawFunds(
+      eoaAddress,
+      kitepassAddress,
+      amount,
+      custodyPrivateKey
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error withdrawing from KitePass:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to withdraw from KitePass',
     });
   }
 });

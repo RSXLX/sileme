@@ -1,6 +1,20 @@
-# Silene (死了呢) - AI Digital Legacy Protocol
+<div align="center">
+  <img src="./silene_logo.png" alt="Silene Logo" width="180" />
+  
+  # Silene (死了呢)
+  
+  ### AI Digital Legacy Protocol
+  
+  **基于 Kite AI Chain 的数字遗产智能分配协议**
 
-> 基于 Kite AI Chain 的数字遗产智能分配协议
+[![Kite AI Chain](https://img.shields.io/badge/Chain-Kite_AI_Testnet-purple?style=flat-square)](https://testnet.kitescan.ai)
+[![Built with](https://img.shields.io/badge/Built_with-gokite_aa_sdk-blue?style=flat-square)](https://github.com/AliensZone/gokite-aa-sdk)
+[![AI](https://img.shields.io/badge/AI-Gemini_API-orange?style=flat-square)](https://ai.google.dev)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](./LICENSE)
+
+</div>
+
+---
 
 ## 🌟 项目简介
 

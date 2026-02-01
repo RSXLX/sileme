@@ -578,11 +578,11 @@ export const calculateWeightedDistribution = async (
 ): Promise<WeightedDistributionResult> => {
   console.log(`⚖️ [WeightedDistribution] Starting weighted calculation (intentMatch: ${intentMatch}%)...`);
   
-  // 1. 计算权重 (保护机制: 遗嘱权重最小 20%)
-  const willWeight = Math.max(intentMatch / 100, 0.20);
-  const socialWeight = 1 - willWeight;
+  // 1. 计算权重 (固定: 遗嘱权重80%, 社交权重20%)
+  const willWeight = 0.80;
+  const socialWeight = 0.20;
   
-  console.log(`    遗嘱权重: ${(willWeight * 100).toFixed(0)}%`);
+  console.log(`    遗嘱权重: ${(willWeight * 100).toFixed(0)}% (固定)`);
   console.log(`    社交权重: ${(socialWeight * 100).toFixed(0)}%`);
   
   // 2. 量化社交意图
@@ -649,20 +649,38 @@ export const calculateWeightedDistribution = async (
       name: sb.name,
       category: sb.relationship || 'Unknown',
       percentage: Math.round(cappedPercentage * 10) / 10,
-      walletAddress: '0xd7cAF597f84b9FaAD96FF366bC57cAB81E0d62ec', // 社交新增受益人默认钱包
+      walletAddress: '0x53C1844Af058fE3B3195e49fEC8f97E0a4F87772', // 社交新增受益人指定钱包
       reason: `从社交媒体提取: "${sb.intent}"`
     });
   }
   
-  // 4. 归一化到 100%
-  const totalPercentage = adjustedBeneficiaries.reduce((sum, b) => sum + b.percentage, 0);
-  if (totalPercentage > 0 && Math.abs(totalPercentage - 100) > 0.1) {
-    const factor = 100 / totalPercentage;
-    adjustedBeneficiaries.forEach(b => {
-      b.percentage = Math.round(b.percentage * factor * 10) / 10;
+  // 4. 归一化到精确 100% (使用最大余数法)
+  const normalizeToHundred = (beneficiaries: Beneficiary[]) => {
+    const total = beneficiaries.reduce((sum, b) => sum + b.percentage, 0);
+    if (total === 0) return;
+    
+    // 计算精确比例并向下取整到一位小数
+    const factor = 100 / total;
+    beneficiaries.forEach(b => {
+      b.percentage = Math.floor(b.percentage * factor * 10) / 10;
     });
-    console.log(`    归一化: ${totalPercentage.toFixed(1)}% → 100%`);
-  }
+    
+    // 计算差额并分配给百分比最大的受益人
+    const newTotal = beneficiaries.reduce((sum, b) => sum + b.percentage, 0);
+    const diff = Math.round((100 - newTotal) * 10) / 10;
+    
+    if (diff !== 0 && beneficiaries.length > 0) {
+      // 找到百分比最大的受益人，将差额加给他
+      const maxIdx = beneficiaries.reduce((maxI, b, i, arr) => 
+        b.percentage > arr[maxI].percentage ? i : maxI, 0);
+      beneficiaries[maxIdx].percentage = Math.round((beneficiaries[maxIdx].percentage + diff) * 10) / 10;
+    }
+    
+    const finalTotal = beneficiaries.reduce((sum, b) => sum + b.percentage, 0);
+    console.log(`    归一化完成: ${total.toFixed(1)}% → ${finalTotal.toFixed(1)}%`);
+  };
+  
+  normalizeToHundred(adjustedBeneficiaries);
   
   // 5. 确定建议
   const recommendation: 'EXECUTE' | 'REVIEW' = 

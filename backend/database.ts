@@ -39,7 +39,11 @@ db.exec(`
     createdAt INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     useStablecoin INTEGER NOT NULL DEFAULT 0,
-    spendingLimits TEXT NOT NULL
+    spendingLimits TEXT NOT NULL,
+    aaWallet TEXT,
+    kitepassAddress TEXT,
+    useKitepass INTEGER NOT NULL DEFAULT 0,
+    spendingRulesConfigured INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE INDEX IF NOT EXISTS idx_wills_owner ON wills(owner);
@@ -131,6 +135,11 @@ export interface StoredWillAuthorization {
   status: 'pending' | 'executed' | 'expired';
   useStablecoin: boolean;
   spendingLimits: SpendingLimits;
+  // KitePass 相关字段
+  aaWallet?: string;
+  kitepassAddress?: string;
+  useKitepass: boolean;
+  spendingRulesConfigured: boolean;
 }
 
 // ==================== 数据库操作 ====================
@@ -141,8 +150,8 @@ export interface StoredWillAuthorization {
 export function saveWill(will: StoredWillAuthorization): void {
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO wills 
-    (willId, owner, beneficiaries, totalAmount, validUntil, signature, createdAt, status, useStablecoin, spendingLimits)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (willId, owner, beneficiaries, totalAmount, validUntil, signature, createdAt, status, useStablecoin, spendingLimits, aaWallet, kitepassAddress, useKitepass, spendingRulesConfigured)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -155,7 +164,11 @@ export function saveWill(will: StoredWillAuthorization): void {
     will.createdAt,
     will.status,
     will.useStablecoin ? 1 : 0,
-    JSON.stringify(will.spendingLimits)
+    JSON.stringify(will.spendingLimits),
+    will.aaWallet || null,
+    will.kitepassAddress || null,
+    will.useKitepass ? 1 : 0,
+    will.spendingRulesConfigured ? 1 : 0
   );
 
   console.log(`💾 [Database] Will saved: ${will.willId}`);
@@ -170,18 +183,7 @@ export function getWillById(willId: string): StoredWillAuthorization | null {
 
   if (!row) return null;
 
-  return {
-    willId: row.willId,
-    owner: row.owner,
-    beneficiaries: JSON.parse(row.beneficiaries),
-    totalAmount: row.totalAmount,
-    validUntil: row.validUntil,
-    signature: row.signature,
-    createdAt: row.createdAt,
-    status: row.status,
-    useStablecoin: row.useStablecoin === 1,
-    spendingLimits: JSON.parse(row.spendingLimits),
-  };
+  return parseWillRow(row);
 }
 
 /**
@@ -214,6 +216,10 @@ function parseWillRow(row: any): StoredWillAuthorization {
     status: row.status,
     useStablecoin: row.useStablecoin === 1,
     spendingLimits: JSON.parse(row.spendingLimits),
+    aaWallet: row.aaWallet || undefined,
+    kitepassAddress: row.kitepassAddress || undefined,
+    useKitepass: row.useKitepass === 1,
+    spendingRulesConfigured: row.spendingRulesConfigured === 1,
   };
 }
 
